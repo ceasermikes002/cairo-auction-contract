@@ -1,115 +1,99 @@
-// Declare this file as a StarkNet contract.
-%lang starknet
-
-from starkware.cairo.common.cairo_builtins import HashBuiltin
-
-// Storage variables
-@storage_var
-func highest_bid() -> (res: felt252) {
+/// Interface representing the auction contract.
+/// This interface allows modification and retrieval of auction-related information.
+#[starknet::interface]
+pub trait IAuctionContract<TContractState> {
+    /// Start a new auction.
+    fn start_auction(ref self: TContractState, nft_id: felt252, duration: felt252);
+    
+    /// Place a bid in the auction.
+    fn place_bid(ref self: TContractState, bid_amount: felt252, bidder: felt252);
+    
+    /// Close the auction.
+    fn close_auction(ref self: TContractState);
+    
+    /// Retrieve the highest bid.
+    fn get_highest_bid(self: @TContractState) -> felt252;
+    
+    /// Retrieve the highest bidder.
+    fn get_highest_bidder(self: @TContractState) -> felt252;
+    
+    /// Retrieve the auction end time.
+    fn get_auction_end_time(self: @TContractState) -> felt252;
+    
+    /// Check if the auction is active.
+    fn is_auction_active(self: @TContractState) -> felt252;
 }
 
-@storage_var
-func highest_bidder() -> (res: felt252) {
-}
+/// Simple auction contract for managing bids.
+#[starknet::contract]
+mod AuctionContract {
+    use core::starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
 
-@storage_var
-func auction_end_time() -> (res: felt252) {
-}
+    #[storage]
+    struct Storage {
+        highest_bid: felt252,
+        highest_bidder: felt252,
+        auction_end_time: felt252,
+        auction_active: felt252,
+    }
 
-@storage_var
-func auction_active() -> (res: felt252) {
-}
+    #[abi(embed_v0)]
+    impl AuctionContractImpl of super::IAuctionContract<ContractState> {
+        fn start_auction(ref self: ContractState, nft_id: felt252, duration: felt252) {
+            let is_active = self.auction_active.read();
+            assert(is_active == 0, 'Auction is already active');
+            
+            let current_time = get_block_timestamp();
+            self.auction_end_time.write(current_time + duration);
+            self.auction_active.write(1);
+            
+            self.highest_bid.write(0);
+            self.highest_bidder.write(0);
+        }
 
-// Function to start an auction
-@external
-func start_auction{
-    syscall_ptr: felt*,
-    pedersen_ptr: HashBuiltin*,
-    range_check_ptr,
-}(nft_id: felt252, duration: felt252) {
-    let (is_active) = auction_active.read();
-    assert is_active == 0;
+        fn place_bid(ref self: ContractState, bid_amount: felt252, bidder: felt252) {
+            let is_active = self.auction_active.read();
+            assert(is_active == 1, 'Auction is not active');
+            
+            let current_time = get_block_timestamp();
+            let end_time = self.auction_end_time.read();
+            assert(current_time < end_time, 'Auction has ended');
+            
+            let current_highest_bid = self.highest_bid.read();
+            assert(bid_amount > current_highest_bid, 'Bid must be higher than the current highest bid');
+            
+            self.highest_bid.write(bid_amount);
+            self.highest_bidder.write(bidder);
+        }
 
-    let current_time = get_block_timestamp();
-    auction_end_time.write!(current_time + duration);
-    auction_active.write!(1);
+        fn close_auction(ref self: ContractState) {
+            let current_time = get_block_timestamp();
+            let end_time = self.auction_end_time.read();
+            assert(current_time >= end_time, 'Auction is still ongoing');
+            
+            self.auction_active.write(0);
+        }
 
-    highest_bid.write!(0);
-    highest_bidder.write!(0);
+        fn get_highest_bid(self: @ContractState) -> felt252 {
+            self.highest_bid.read()
+        }
 
-    return ();
-}
+        fn get_highest_bidder(self: @ContractState) -> felt252 {
+            self.highest_bidder.read()
+        }
 
-// Function to place a bid
-@external
-func place_bid{
-    syscall_ptr: felt*,
-    pedersen_ptr: HashBuiltin*,
-    range_check_ptr,
-}(bid_amount: felt252, bidder: felt252) {
-    let (is_active) = auction_active.read();
-    assert is_active == 1;
+        fn get_auction_end_time(self: @ContractState) -> felt252 {
+            self.auction_end_time.read()
+        }
 
-    let current_time = get_block_timestamp();
-    let (end_time) = auction_end_time.read();
-    assert current_time < end_time;
+        fn is_auction_active(self: @ContractState) -> felt252 {
+            self.auction_active.read()
+        }
+    }
 
-    let (current_highest_bid) = highest_bid.read();
-    assert bid_amount > current_highest_bid;
-
-    // Update the highest bid and bidder
-    highest_bid.write!(bid_amount);
-    highest_bidder.write!(bidder);
-
-    return ();
-}
-
-// Function to close the auction
-@external
-func close_auction{
-    syscall_ptr: felt*,
-    pedersen_ptr: HashBuiltin*,
-    range_check_ptr,
-}() {
-    let current_time = get_block_timestamp();
-    let (end_time) = auction_end_time.read();
-    assert current_time >= end_time;
-
-    auction_active.write!(0);
-
-    return ();
-}
-
-// Helper function to get the current block timestamp
-@view
-func get_block_timestamp() -> (res: felt252) {
-    return (block.timestamp);
-}
-
-// Function to get the highest bid
-@view
-func get_highest_bid() -> (res: felt252) {
-    let (res) = highest_bid.read();
-    return (res);
-}
-
-// Function to get the highest bidder
-@view
-func get_highest_bidder() -> (res: felt252) {
-    let (res) = highest_bidder.read();
-    return (res);
-}
-
-// Function to get the auction end time
-@view
-func get_auction_end_time() -> (res: felt252) {
-    let (res) = auction_end_time.read();
-    return (res);
-}
-
-// Function to check if the auction is active
-@view
-func is_auction_active() -> (res: felt252) {
-    let (res) = auction_active.read();
-    return (res);
+    // Helper function to get the current block timestamp.
+    #[view]
+    fn get_block_timestamp() -> felt252 {
+        return block.timestamp;
+    }
 }
